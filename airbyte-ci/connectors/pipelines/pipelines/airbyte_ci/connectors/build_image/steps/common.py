@@ -2,6 +2,7 @@
 # Copyright (c) 2023 Airbyte, Inc., all rights reserved.
 #
 
+import json
 from abc import ABC
 from typing import List, Tuple
 
@@ -9,7 +10,7 @@ import docker
 from dagger import Container, ExecError, Platform, QueryError
 from pipelines.airbyte_ci.connectors.context import ConnectorContext
 from pipelines.consts import BUILD_PLATFORMS
-from pipelines.helpers.utils import export_container_to_tarball
+from pipelines.helpers.utils import export_containers_to_tarball
 from pipelines.models.steps import Step, StepResult, StepStatus
 
 
@@ -58,26 +59,34 @@ class BuildConnectorImagesBase(Step, ABC):
 class LoadContainerToLocalDockerHost(Step):
     IMAGE_TAG = "dev"
 
-    def __init__(self, context: ConnectorContext, platform: Platform, containers: dict[Platform, Container]) -> None:
+    def __init__(self, context: ConnectorContext, containers: dict[Platform, Container]) -> None:
         super().__init__(context)
-        self.platform = platform
-        self.container = containers[platform]
+        self.containers = containers
 
     @property
     def title(self):
-        return f"Load {self.image_name}:{self.IMAGE_TAG} for platform {self.platform} to the local docker host."
+        return f"Load {self.image_name}:{self.IMAGE_TAG} to the local docker host."
 
     @property
     def image_name(self) -> Tuple:
         return f"airbyte/{self.context.connector.technical_name}"
 
     async def _run(self) -> StepResult:
-        _, exported_tarball_path = await export_container_to_tarball(self.context, self.container)
+        container_variants = list(self.containers.values())
+        _, exported_tar_path = await export_containers_to_tarball(self.context, container_variants)
         client = docker.from_env()
         try:
-            with open(exported_tarball_path, "rb") as tarball_content:
-                new_image = client.images.load(tarball_content.read())[0]
-            new_image.tag(self.image_name, tag=self.IMAGE_TAG)
-            return StepResult(self, StepStatus.SUCCESS)
+            response = client.api.import_image_from_file(str(exported_tar_path), repository=self.image_name, tag=self.IMAGE_TAG)
+            try:
+                image_sha = json.loads(response)["status"]
+            except KeyError:
+                return StepResult(
+                    self,
+                    StepStatus.FAILURE,
+                    stderr=f"Failed to load image {self.image_name}:{self.IMAGE_TAG} to your Docker host: {response}",
+                )
+            return StepResult(
+                self, StepStatus.SUCCESS, stdout=f"Loaded image {self.image_name}:{self.IMAGE_TAG} to your Docker host ({image_sha})."
+            )
         except ConnectionError:
             return StepResult(self, StepStatus.FAILURE, stderr="The connection to the local docker host failed.")

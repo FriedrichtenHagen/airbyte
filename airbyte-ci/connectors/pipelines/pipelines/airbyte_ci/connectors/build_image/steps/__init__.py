@@ -5,17 +5,16 @@
 
 from __future__ import annotations
 
-import platform
+from typing import List
 
 import anyio
+import dagger
 from connector_ops.utils import ConnectorLanguage
-from pipelines.models.steps import StepResult
-from pipelines.airbyte_ci.connectors.build_image.steps import python_connectors
+from pipelines.airbyte_ci.connectors.build_image.steps import java_connectors, python_connectors
 from pipelines.airbyte_ci.connectors.build_image.steps.common import LoadContainerToLocalDockerHost, StepStatus
-from pipelines.consts import LOCAL_BUILD_PLATFORM
-from pipelines.airbyte_ci.connectors.build_image.steps import java_connectors
 from pipelines.airbyte_ci.connectors.context import ConnectorContext
 from pipelines.airbyte_ci.connectors.reports import ConnectorReport
+from pipelines.models.steps import StepResult
 
 
 class NoBuildStepForLanguageError(Exception):
@@ -29,29 +28,32 @@ LANGUAGE_BUILD_CONNECTOR_MAPPING = {
 }
 
 
-async def run_connector_build(context: ConnectorContext) -> StepResult:
+async def run_connector_build(context: ConnectorContext, build_platforms: List[dagger.Platform]) -> StepResult:
     """Run a build pipeline for a single connector."""
     if context.connector.language not in LANGUAGE_BUILD_CONNECTOR_MAPPING:
         raise NoBuildStepForLanguageError(f"No build step for connector language {context.connector.language}.")
-    return await LANGUAGE_BUILD_CONNECTOR_MAPPING[context.connector.language](context)
+    return await LANGUAGE_BUILD_CONNECTOR_MAPPING[context.connector.language](context, build_platforms)
 
 
-async def run_connector_build_pipeline(context: ConnectorContext, semaphore: anyio.Semaphore) -> ConnectorReport:
+async def run_connector_build_pipeline(
+    context: ConnectorContext, semaphore: anyio.Semaphore, build_platforms: List[dagger.Platform]
+) -> ConnectorReport:
     """Run a build pipeline for a single connector.
 
     Args:
         context (ConnectorContext): The initialized connector context.
-
+        semaphore (anyio.Semaphore): The semaphore to use to limit the number of concurrent builds.
+        build_platforms (List[dagger.Platform]): The platforms for which to build the connector.
     Returns:
         ConnectorReport: The reports holding builds results.
     """
     step_results = []
     async with semaphore:
         async with context:
-            build_result = await run_connector_build(context)
+            build_result = await run_connector_build(context, build_platforms)
             step_results.append(build_result)
             if context.is_local and build_result.status is StepStatus.SUCCESS:
-                load_image_result = await LoadContainerToLocalDockerHost(context, LOCAL_BUILD_PLATFORM, build_result.output_artifact).run()
+                load_image_result = await LoadContainerToLocalDockerHost(context, build_result.output_artifact).run()
                 step_results.append(load_image_result)
             context.report = ConnectorReport(context, step_results, name="BUILD RESULTS")
         return context.report

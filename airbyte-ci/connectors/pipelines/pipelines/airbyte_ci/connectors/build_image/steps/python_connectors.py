@@ -3,6 +3,8 @@
 #
 
 
+from typing import List
+
 from dagger import Container, Platform
 from pipelines.airbyte_ci.connectors.build_image.steps import build_customization
 from pipelines.airbyte_ci.connectors.build_image.steps.common import BuildConnectorImagesBase
@@ -101,5 +103,5 @@ class BuildConnectorImages(BuildConnectorImagesBase):
         return container
 
 
-async def run_connector_build(context: ConnectorContext) -> StepResult:
-    return await BuildConnectorImages(context).run()
+async def run_connector_build(context: ConnectorContext, build_platforms: List[Platform]) -> StepResult:
+    return await BuildConnectorImages(context, *build_platforms).run()

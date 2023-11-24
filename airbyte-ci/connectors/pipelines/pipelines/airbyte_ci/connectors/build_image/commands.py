@@ -2,11 +2,14 @@
 # Copyright (c) 2023 Airbyte, Inc., all rights reserved.
 #
 
+from typing import List
+
 import asyncclick as click
 from pipelines.airbyte_ci.connectors.build_image.steps import run_connector_build_pipeline
 from pipelines.airbyte_ci.connectors.context import ConnectorContext
 from pipelines.airbyte_ci.connectors.pipeline import run_connectors_pipelines
 from pipelines.cli.dagger_pipeline_command import DaggerPipelineCommand
+from pipelines.consts import LOCAL_MACHINE_TYPE, PLATFORM_MACHINE_TO_DAGGER_PLATFORM
 
 
 @click.command(cls=DaggerPipelineCommand, help="Build all images for the selected connectors.")
@@ -17,10 +20,19 @@ from pipelines.cli.dagger_pipeline_command import DaggerPipelineCommand
     default=False,
     type=bool,
 )
+@click.option(
+    "-a",
+    "--architecture",
+    "build_architectures",
+    help="Architecture for which to build the connector image. If not specified, the image will be built for the local architecture.",
+    multiple=True,
+    default=[LOCAL_MACHINE_TYPE],
+    type=click.Choice(PLATFORM_MACHINE_TO_DAGGER_PLATFORM.keys(), case_sensitive=True),
+)
 @click.pass_context
-async def build(ctx: click.Context, use_host_gradle_dist_tar: bool) -> bool:
+async def build(ctx: click.Context, use_host_gradle_dist_tar: bool, build_architectures: List[str]) -> bool:
     """Runs a build pipeline for the selected connectors."""
-
+    build_platforms = [PLATFORM_MACHINE_TO_DAGGER_PLATFORM[arch] for arch in build_architectures]
     connectors_contexts = [
         ConnectorContext(
             pipeline_name=f"Build connector {connector.technical_name}",
@@ -53,6 +65,7 @@ async def build(ctx: click.Context, use_host_gradle_dist_tar: bool) -> bool:
         ctx.obj["concurrency"],
         ctx.obj["dagger_logs_path"],
         ctx.obj["execute_timeout"],
+        build_platforms,
     )
 
     return True
