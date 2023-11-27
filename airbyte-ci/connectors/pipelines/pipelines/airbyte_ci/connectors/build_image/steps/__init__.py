@@ -51,9 +51,10 @@ async def run_connector_build_pipeline(
     async with semaphore:
         async with context:
             build_result = await run_connector_build(context, build_platforms)
+            per_platform_built_containers = build_result.output_artifact
             step_results.append(build_result)
             if context.is_local and build_result.status is StepStatus.SUCCESS:
-                load_image_result = await LoadContainerToLocalDockerHost(context, build_result.output_artifact).run()
+                load_image_result = await LoadContainerToLocalDockerHost(context, per_platform_built_containers).run()
                 step_results.append(load_image_result)
             context.report = ConnectorReport(context, step_results, name="BUILD RESULTS")
         return context.report
